@@ -495,6 +495,16 @@ describe("AI repair inside the card", () => {
     expect(completeMock).not.toHaveBeenCalled();
     if (fails) expect(document.querySelector('[role="alert"]')?.textContent).toContain("Connection test failed");
   });
+  it("offers no dismissal while fixable, but lets a stale request be dismissed once setup is unavailable", async () => {
+    renderBody(interaction); await flush();
+    expect(button("Not now")).toBeUndefined();
+    await act(() => root!.unmount()); root = null;
+    setupOptionsMock.mockRejectedValue(new Error("The agent’s AI configuration changed. Start a new execution."));
+    renderBody(interaction);
+    await waitForAssertion(() => expect(button("Not now")).toBeDefined());
+    await act(() => button("Not now")!.click());
+    await waitForAssertion(() => expect(declineMock).toHaveBeenCalledWith(interaction.id));
+  });
   it.each(["anthropic", "openai"])("connects a missing %s default directly in the task", async (provider) => {
     setupOptionsMock.mockResolvedValue({ interaction, existingConnections: [], aiConnection: { provider, method: "api_key", mode: "responsible_user" } });
     completeMock.mockResolvedValue({ ...interaction, status: "accepted" });

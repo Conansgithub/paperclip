@@ -475,7 +475,9 @@ export function ConnectionIntentInteractionBody({
           onDecline={() => declineMutation.mutate()}
           declining={declineMutation.isPending}
         /> : <div className="mt-4 flex flex-wrap justify-end gap-2">
-          {!isAi && <Button
+          {/* An AI request has no "Not now" while it can be fixed; once setup is
+              unavailable (e.g. the agent moved to another AI configuration) it can only be dismissed. */}
+          {(!isAi || setupQuery.isError) && <Button
             type="button"
             variant="ghost"
             disabled={declineMutation.isPending || completeMutation.isPending || authorizing}
