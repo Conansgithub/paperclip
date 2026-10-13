@@ -43,6 +43,7 @@ describe("Claude model defaults", () => {
     { CLAUDE_CODE_USE_BEDROCK: "true" },
     { ANTHROPIC_BEDROCK_BASE_URL: "https://bedrock.example" },
     { CLAUDE_CODE_USE_VERTEX: "1" },
+    { ANTHROPIC_BASE_URL: "https://relay.example" },
   ])("keeps provider-specific defaults for %j", (env) => {
     expect(resolveClaudeModel(undefined, env)).toBe("");
     expect(resolveClaudeModel("provider-model", env)).toBe("provider-model");

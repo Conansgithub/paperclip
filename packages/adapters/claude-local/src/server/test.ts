@@ -33,7 +33,7 @@ import {
 } from "./cli-capabilities.js";
 import { isBedrockModelId } from "./models.js";
 import { buildClaudeProbePermissionArgs, claudeSandboxPermissionEnv } from "./permissions.js";
-import { prepareSandboxClaudeProbeRuntime } from "./claude-config.js";
+import { prepareSandboxClaudeProbeRuntime, readClaudeUserSettingsEnv } from "./claude-config.js";
 import { resolveClaudeModel, SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { resolveClaudeExecutionEngineForRun, testClaudeAcpEnvironment } from "./acp.js";
 import { ADAPTER_AUTH_MISSING_CHECK_CODE } from "./auth-check.js";
@@ -244,7 +244,12 @@ export async function testEnvironment(
         check.code !== "claude_managed_config_dir_failed",
     );
   let configuredModelIsCompatible = true;
-  const configuredModel = resolveClaudeModel(config.model, considerHostEnv ? { ...process.env, ...env } : env);
+  const configuredModel = resolveClaudeModel(
+    config.model,
+    considerHostEnv
+      ? { ...process.env, ...env, ...(config.managedAiConnection ? {} : readClaudeUserSettingsEnv({ ...process.env, ...env } as NodeJS.ProcessEnv)) }
+      : env,
+  );
   const minimumCliVersion =
     claudeCommandLooksLike(command, "claude") &&
     (!hasBedrock || isBedrockModelId(configuredModel))

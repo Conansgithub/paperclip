@@ -13,9 +13,10 @@ export function AiConnectionLegacyNotice({
         Existing authentication — not managed by Connections
       </h3>
       <p className="text-sm text-muted-foreground">
-        This agent keeps its current authentication until you choose and test a
-        managed connection. Confirm the account and who may use it before
-        adopting.
+        This agent runs with this machine&apos;s own CLI configuration and login
+        (for example the provider selected in CC Switch) until you choose and
+        test a managed connection. Confirm the account and who may use it
+        before adopting.
       </p>
       {!readOnly && (
         <Button variant="outline" className="self-start" onClick={onAdopt}>

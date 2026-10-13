@@ -895,8 +895,8 @@ describe("AgentConfigForm environment selector", () => {
     roots.push(existing.root);
     const created = await renderCreateForm(environments, { adapterType: "claude_local", model: "" });
     roots.push(created.root);
-    expect(existing.container.textContent).toContain("Default (claude-opus-5)");
-    expect(created.container.textContent).toContain("Default (claude-opus-5)");
+    expect(existing.container.textContent).toContain("Default (claude-opus-5, or your Claude settings' provider model)");
+    expect(created.container.textContent).toContain("Default (claude-opus-5, or your Claude settings' provider model)");
     expect(existing.onSave).not.toHaveBeenCalled();
   });
 

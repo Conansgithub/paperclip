@@ -209,6 +209,23 @@ describe("agent-created hires use managed AI connections", () => {
     expect(saved.runtimeConfig.aiConnection).toEqual(p.binding);
   });
 
+  it("lets only an instance admin return an agent to this machine's CLI configuration, and hires inherit it", async () => {
+    const f = await fixture("anthropic");
+    const denied = await request(f.app).patch(`/api/agents/${f.agentId}`).send({ runtimeConfig: { aiConnection: null } });
+    expect(denied.status, JSON.stringify(denied.body)).toBe(403);
+    expect((await db.select().from(agents).where(eq(agents.id, f.agentId)))[0]!.runtimeConfig.aiConnection).toEqual(f.binding);
+    const board = express();
+    board.use(express.json());
+    board.use((req, _res, next) => { req.actor = { type: "board", userId: "local-board", source: "local_implicit", isInstanceAdmin: true }; next(); });
+    board.use("/api", agentRoutes(db));
+    board.use(errorHandler);
+    const cleared = await request(board).patch(`/api/agents/${f.agentId}`).send({ runtimeConfig: { aiConnection: null } });
+    expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+    expect((await db.select().from(agents).where(eq(agents.id, f.agentId)))[0]!.runtimeConfig).not.toHaveProperty("aiConnection");
+    const agent = hired(await request(f.app).post(`/api/companies/${f.companyId}/agent-hires`).send({ name: "Local CLI teammate", role: "engineer", adapterType: f.adapterType }));
+    expect(agent.runtimeConfig.aiConnection).toBeUndefined();
+  });
+
   for (const operation of ["test", "save"] as const) {
     it.each([401, 403, 429, 503, null])(`${operation} changes API-key health only for a provider rejection (status: %s)`, async (status) => {
       const f = await fixture("anthropic", "api_key");

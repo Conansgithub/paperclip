@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -168,6 +169,31 @@ export function isManagedCodexHomePath(
  * symlinks), so a dangling auth symlink whose source has been removed counts as
  * no usable credentials.
  */
+/**
+ * True when config.toml selects a custom `model_provider` that carries its own
+ * credentials instead of the OpenAI login in auth.json. CC Switch writes a
+ * third-party provider this way (`[model_providers.custom]` with
+ * `experimental_bearer_token`) and removes auth.json.
+ */
+export async function codexHomeUsesSelfAuthenticatedProvider(home: string): Promise<boolean> {
+  const raw = await fs.readFile(path.join(home, "config.toml"), "utf8").catch(() => "");
+  // ponytail: line-based TOML scan of one root key and one table; swap for a TOML parser if configs get exotic.
+  const lines = raw.split(/\r?\n/);
+  const firstTable = lines.findIndex((line) => /^\s*\[/.test(line));
+  const root = firstTable === -1 ? lines : lines.slice(0, firstTable);
+  const provider = root
+    .map((line) => /^\s*model_provider\s*=\s*["']([^"']+)["']/.exec(line)?.[1])
+    .find(Boolean);
+  if (!provider || provider === "openai") return false;
+  const header = new RegExp(`^\\s*\\[model_providers\\.(?:"${provider}"|'${provider}'|${provider})\\]\\s*$`);
+  const start = lines.findIndex((line) => header.test(line));
+  if (start === -1) return false;
+  const end = lines.findIndex((line, index) => index > start && /^\s*\[/.test(line));
+  const table = lines.slice(start + 1, end === -1 ? undefined : end);
+  if (table.some((line) => /^\s*requires_openai_auth\s*=\s*true\b/.test(line))) return false;
+  return table.some((line) => /^\s*(experimental_bearer_token|env_key|base_url)\s*=/.test(line));
+}
+
 export async function codexHomeHasUsableAuth(home: string): Promise<boolean> {
   const authPath = path.join(home, "auth.json");
   if (!(await pathExists(authPath))) return false;
@@ -248,11 +274,20 @@ export async function ensureSymlink(target: string, source: string): Promise<voi
   await createExpectedSymlink(target, source);
 }
 
+/**
+ * Copy again whenever the shared source changes (e.g. CC Switch switched the
+ * provider in ~/.codex/config.toml); the sidecar records the copied source.
+ * Paperclip's managed blocks are rewritten onto the copy on every run.
+ */
 async function ensureCopiedFile(target: string, source: string): Promise<void> {
   const existing = await fs.lstat(target).catch(() => null);
-  if (existing) return;
+  if (existing?.isSymbolicLink()) return;
+  const digest = createHash("sha256").update(await fs.readFile(source)).digest("hex");
+  const marker = `${target}.paperclip-source-sha256`;
+  if (existing && (await fs.readFile(marker, "utf8").catch(() => null)) === digest) return;
   await ensureParentDir(target);
   await fs.copyFile(source, target);
+  await fs.writeFile(marker, digest);
 }
 
 function tomlString(value: string): string {
@@ -930,6 +965,8 @@ export async function evaluateCodexCredentialReadiness(
 
   const ready =
     (await codexHomeHasUsableAuth(effectiveHome)) ||
-    (await codexHomeHasUsableAuth(sharedSourceHome));
+    (await codexHomeHasUsableAuth(sharedSourceHome)) ||
+    // The managed home's config.toml is re-copied from the shared one before each run.
+    (await codexHomeUsesSelfAuthenticatedProvider(sharedSourceHome));
   return { managed: true, authMode: "subscription", ready, effectiveHome, sharedSourceHome };
 }

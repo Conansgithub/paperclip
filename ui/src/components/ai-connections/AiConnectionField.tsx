@@ -48,6 +48,7 @@ export function AiConnectionField({
   legacy = false,
   readOnly = false,
   routerAdapterType,
+  onUseLocalCli,
 }: {
   companyId: string;
   agentId?: string;
@@ -60,6 +61,8 @@ export function AiConnectionField({
   legacy?: boolean;
   readOnly?: boolean;
   routerAdapterType?: string;
+  /** Offered on a saved agent: drop the managed binding and run on this machine's CLI configuration. */
+  onUseLocalCli?: () => void;
 }) {
   const provider = aiProviderForAdapter(adapterType);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -151,6 +154,17 @@ export function AiConnectionField({
         onReconnect={(!value || value.mode === "responsible_user") && personalDefault && personalDefault.status !== "connected" ? () => openConnection(personalDefault) : undefined}
         onRetry={() => void accounts.refetch()}
       />}
+      {onUseLocalCli && value && !readOnly && (
+        <div className="space-y-1">
+          <Button type="button" variant="outline" size="sm" onClick={onUseLocalCli}>
+            Use this machine&apos;s CLI configuration
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Runs with the CLI config and login on this machine, for example the
+            provider selected in CC Switch. Takes effect when saved.
+          </p>
+        </div>
+      )}
       <Dialog
         open={Boolean(pendingAdoption)}
         onOpenChange={(open) => {

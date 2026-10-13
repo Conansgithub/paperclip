@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -125,6 +126,44 @@ export function resolveSharedClaudeConfigDir(
 ): string {
   const fromEnv = nonEmpty(env.CLAUDE_CONFIG_DIR);
   return fromEnv ? path.resolve(fromEnv) : path.join(os.homedir(), ".claude");
+}
+
+/** String entries of the user's Claude settings.json `env` block, where tools such as CC Switch write the provider. */
+export function readClaudeUserSettingsEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  try {
+    const block = (JSON.parse(readFileSync(path.join(resolveSharedClaudeConfigDir(env), "settings.json"), "utf8")) as { env?: unknown }).env;
+    if (!block || typeof block !== "object" || Array.isArray(block)) return {};
+    return Object.fromEntries(Object.entries(block).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  } catch {
+    return {};
+  }
+}
+
+const isClaudeProviderEnvKey = (key: string) =>
+  key.startsWith("ANTHROPIC_") || /^CLAUDE_CODE_(USE_|SUBAGENT_MODEL|OAUTH_TOKEN)/.test(key);
+
+/**
+ * Blank overrides for provider keys a local (unmanaged) run would otherwise
+ * inherit from the server process. The Claude CLI applies settings.json `env`
+ * over the process env, so when the settings route the provider (CC Switch), or
+ * the server itself was started from a Claude Code session (its ANTHROPIC_* is a
+ * snapshot of that session's settings), inherited keys are stale: a key the new
+ * provider omits would leak from the old one. Keys set in the agent config win.
+ */
+export function staleInheritedClaudeProviderEnv(
+  inheritedEnv: Record<string, unknown>,
+  configEnv: Record<string, unknown>,
+  settingsEnv: Record<string, string>,
+): Record<string, string> {
+  const settingsRouteProvider = Object.entries(settingsEnv).some(
+    ([key, value]) => value.trim() && /^(ANTHROPIC_(BASE_URL|AUTH_TOKEN|API_KEY)|CLAUDE_CODE_USE_)/.test(key),
+  );
+  if (!settingsRouteProvider && !inheritedEnv.CLAUDECODE) return {};
+  return Object.fromEntries(
+    Object.keys(inheritedEnv)
+      .filter((key) => isClaudeProviderEnvKey(key) && !(key in configEnv))
+      .map((key) => [key, ""]),
+  );
 }
 
 export function resolveManagedClaudeConfigSeedDir(

@@ -44,6 +44,8 @@ import {
   materializeRemoteClaudeConfig,
   prepareClaudeConfigSeed,
   prepareSandboxClaudeProbeRuntime,
+  readClaudeUserSettingsEnv,
+  staleInheritedClaudeProviderEnv,
 } from "./claude-config.js";
 import {
   buildAdapterTestTargetCheck,
@@ -125,8 +127,18 @@ export function buildClaudeAcpConfig(
   config: Record<string, unknown>,
   inheritedEnv: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const env = parseObject(config.env);
-  const model = resolveClaudeModel(config.model, { ...inheritedEnv, ...env });
+  const configEnv = parseObject(config.env);
+  // Local unmanaged runs follow the user's Claude settings (e.g. CC Switch); managed and remote runs do not read them.
+  const followsUserSettings = !config.managedAiConnection && Object.keys(inheritedEnv).length > 0;
+  const settingsEnv = followsUserSettings ? readClaudeUserSettingsEnv({ ...inheritedEnv, ...configEnv } as NodeJS.ProcessEnv) : {};
+  // acpx launches Claude ACP without the "user" setting source (it keeps the
+  // user's hooks, plugins and permissions out of agents), so the CLI never reads
+  // settings.json `env` here. Pass that env block explicitly instead; it is read
+  // on every run, so a provider switch applies to the next run.
+  const env = followsUserSettings
+    ? { ...staleInheritedClaudeProviderEnv(inheritedEnv, configEnv, settingsEnv), ...settingsEnv, ...configEnv }
+    : configEnv;
+  const model = resolveClaudeModel(config.model, { ...inheritedEnv, ...env, ...settingsEnv });
   const agentCommand = firstNonEmptyString(config.agentCommand, config.acpAgentCommand);
   const stateDir = firstNonEmptyString(config.stateDir, config.acpStateDir);
   const mode = firstNonEmptyString(config.mode, config.acpMode) ?? DEFAULT_ACP_ENGINE_MODE;
@@ -145,7 +157,7 @@ export function buildClaudeAcpConfig(
     ...config,
     model,
     // ACP reads ANTHROPIC_MODEL at startup; keep it aligned with CLI precedence.
-    ...(model ? { env: { ...env, ANTHROPIC_MODEL: model } } : {}),
+    ...(model ? { env: { ...env, ANTHROPIC_MODEL: model } } : followsUserSettings ? { env } : {}),
     agent: "claude",
     mode,
     permissionMode,

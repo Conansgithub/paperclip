@@ -22,6 +22,7 @@ import { ModelSourceTiles } from "../onboarding/ModelSourceTiles";
 import { CredentialModeLink } from "../onboarding/CredentialModeLink";
 import { FooterNav } from "../onboarding/FooterNav";
 import { MAKE_ROOM, CARD_ENTER } from "../onboarding/onboarding-motion";
+import { Button } from "@/components/ui/button";
 import { buildFixedClaudeOAuthBinding } from "../environment-variables-editor/model";
 import type { EnvBinding } from "@paperclipai/shared";
 
@@ -221,6 +222,25 @@ export function AgentProviderConnection({
       if (run === epoch.current) setBusy(false);
     }
   }
+  /** No managed connection: the agent runs on this machine's CLI configuration and login (e.g. CC Switch). */
+  async function connectLocalCli() {
+    if (busy) return;
+    const run = ++epoch.current;
+    setBusy(true);
+    setError(null);
+    try {
+      const connection: ProviderConnection = { env: {} };
+      const connected = await testConnection(connection);
+      if (run !== epoch.current) return;
+      if (connected) onConnected(connection);
+      else setError("The local CLI did not respond. Check its configuration (for example in CC Switch) and try again.");
+    } catch (cause) {
+      if (run !== epoch.current) return;
+      setError(cause instanceof Error ? cause.message : "Could not reach the local CLI.");
+    } finally {
+      if (run === epoch.current) setBusy(false);
+    }
+  }
   const needsLogin =
     method === "subscription" &&
     canLogin &&
@@ -380,6 +400,11 @@ export function AgentProviderConnection({
           </div>
         )}
       </motion.div>
+      {canUseLocalLogin && !managedAccount && (
+        <Button type="button" variant="ghost" size="sm" className="-ml-3 mt-3" disabled={busy} onClick={() => void connectLocalCli()}>
+          Use this machine&apos;s CLI configuration (e.g. CC Switch)
+        </Button>
+      )}
       {method === "subscription" && storedLogin.isError && (
         <p role="alert" className="mt-4 text-sm text-destructive">
           Could not check your saved Claude subscription. Try again.

@@ -5693,8 +5693,16 @@ export function agentRoutes(
         adapterConfig: patchData.adapterConfig,
       });
     }
-    if (existing.runtimeConfig.aiConnection && requestedRuntimeConfig && !requestedRuntimeConfig.aiConnection) requestedRuntimeConfig.aiConnection = existing.runtimeConfig.aiConnection;
-    const nextAiBinding = aiRuntimeConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
+    // An explicit null returns the agent to this machine's own CLI configuration
+    // and login (e.g. a provider set by CC Switch). That is host authority, so
+    // only an instance admin may choose it; omitting the key keeps the binding.
+    const clearsAiBinding = requestedRuntimeConfig?.aiConnection === null;
+    if (clearsAiBinding) {
+      assertInstanceAdmin(req);
+      await assertCanUpdateAgent(req, existing);
+      delete requestedRuntimeConfig!.aiConnection;
+    } else if (existing.runtimeConfig.aiConnection && requestedRuntimeConfig && !requestedRuntimeConfig.aiConnection) requestedRuntimeConfig.aiConnection = existing.runtimeConfig.aiConnection;
+    const nextAiBinding = clearsAiBinding ? undefined : aiRuntimeConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
     if (nextAiBinding) {
       await assertCanUpdateAgent(req, existing);
       const changed = JSON.stringify(nextAiBinding) !== JSON.stringify(existing.runtimeConfig.aiConnection);

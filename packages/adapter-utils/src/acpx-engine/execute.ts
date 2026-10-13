@@ -1003,10 +1003,16 @@ function isErrnoException(err: unknown, code: string): err is NodeJS.ErrnoExcept
   return err instanceof Error && "code" in err && err.code === code;
 }
 
+/** Same contract as codex-local's ensureCopiedFile: re-copy when the shared source changes. */
 async function ensureCopiedFile(target: string, source: string): Promise<void> {
-  if (await pathExists(target)) return;
+  const existing = await fs.lstat(target).catch(() => null);
+  if (existing?.isSymbolicLink()) return;
+  const digest = createHash("sha256").update(await fs.readFile(source)).digest("hex");
+  const marker = `${target}.paperclip-source-sha256`;
+  if (existing && (await fs.readFile(marker, "utf8").catch(() => null)) === digest) return;
   await ensureParentDir(target);
   await fs.copyFile(source, target);
+  await fs.writeFile(marker, digest);
 }
 
 async function prepareManagedCodexHome(input: {

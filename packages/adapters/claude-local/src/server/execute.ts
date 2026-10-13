@@ -79,8 +79,10 @@ import {
 import {
   materializeRemoteClaudeConfig,
   prepareClaudeConfigSeed,
+  readClaudeUserSettingsEnv,
   resolveManagedClaudeRuntimeStateDir,
   resolveSharedClaudeConfigDir,
+  staleInheritedClaudeProviderEnv,
   writePaperclipClaudeMcpConfig,
 } from "./claude-config.js";
 import {
@@ -122,6 +124,8 @@ interface ClaudeRuntimeConfig {
   workspaceRepoUrl: string | null;
   workspaceRepoRef: string | null;
   env: Record<string, string>;
+  /** The user's Claude settings.json env the CLI applies over `env` (local unmanaged runs only). */
+  userSettingsEnv: Record<string, string>;
   loggedEnv: Record<string, string>;
   timeoutSec: number;
   graceSec: number;
@@ -294,6 +298,13 @@ async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<Cl
     executionCwd: shapedWorkspaceEnv.workspaceCwd,
     executionTargetIsRemote,
   });
+  // Local unmanaged runs follow the user's Claude settings (e.g. CC Switch); see staleInheritedClaudeProviderEnv.
+  const userSettingsEnv = !config.managedAiConnection && !executionTargetIsRemote
+    ? readClaudeUserSettingsEnv({ ...process.env, ...shapedEnvConfig } as NodeJS.ProcessEnv)
+    : {};
+  if (!config.managedAiConnection && !executionTargetIsRemote) {
+    Object.assign(env, staleInheritedClaudeProviderEnv(process.env, shapedEnvConfig, userSettingsEnv));
+  }
   for (const [key, value] of Object.entries(shapedEnvConfig)) {
     if (typeof value !== "string") continue;
     // Runtime PAPERCLIP_* always wins over config, and PAPERCLIP_API_KEY is
@@ -354,6 +365,7 @@ async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<Cl
     workspaceRepoUrl,
     workspaceRepoRef,
     env,
+    userSettingsEnv,
     loggedEnv,
     timeoutSec,
     graceSec,
@@ -473,6 +485,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     workspaceRepoUrl,
     workspaceRepoRef,
     env,
+    userSettingsEnv,
     loggedEnv: initialLoggedEnv,
     timeoutSec,
     graceSec,
@@ -490,9 +503,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       (entry): entry is [string, string] => typeof entry[1] === "string",
     ),
   );
-  const modelEnv = executionTargetIsRemote ? env : effectiveEnv;
+  const modelEnv = executionTargetIsRemote ? env : { ...effectiveEnv, ...userSettingsEnv };
   const model = resolveClaudeModel(config.model, modelEnv);
-  const billingType = resolveClaudeBillingType(effectiveEnv);
+  const billingType = resolveClaudeBillingType({ ...effectiveEnv, ...userSettingsEnv });
   const claudeSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
   const desiredSkillNames = new Set(resolveClaudeDesiredSkillNames(config, claudeSkillEntries));
   // When instructionsFilePath is configured, build a stable content-addressed

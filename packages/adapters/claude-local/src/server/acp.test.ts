@@ -290,6 +290,28 @@ describe("claude_local ACP lane", () => {
     expect(buildClaudeAcpConfig({ env: { CLAUDE_CODE_USE_VERTEX: "1" } }).model).toBe("");
   });
 
+  it("follows the provider in the user's Claude settings for local unmanaged runs", async () => {
+    const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-claude-settings-"));
+    try {
+      await fs.writeFile(path.join(configDir, "settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://relay.example", ANTHROPIC_AUTH_TOKEN: "fixture" } }));
+      const inherited = { CLAUDE_CONFIG_DIR: configDir, ANTHROPIC_MODEL: "stale-model", ANTHROPIC_API_KEY: "stale-key", PATH: "/bin" };
+      // acpx omits the "user" setting source, so the settings env is passed explicitly;
+      // stale server-env provider keys it does not set are blanked, and agent config wins.
+      expect(buildClaudeAcpConfig({ env: { ANTHROPIC_SMALL_FAST_MODEL: "explicit" } }, inherited)).toMatchObject({
+        model: "",
+        env: { ANTHROPIC_BASE_URL: "https://relay.example", ANTHROPIC_AUTH_TOKEN: "fixture", ANTHROPIC_MODEL: "", ANTHROPIC_API_KEY: "", ANTHROPIC_SMALL_FAST_MODEL: "explicit" },
+      });
+      await fs.writeFile(path.join(configDir, "settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://relay.example", ANTHROPIC_MODEL: "relay-model" } }));
+      expect(buildClaudeAcpConfig({}, inherited)).toMatchObject({ model: "relay-model", env: { ANTHROPIC_MODEL: "relay-model", ANTHROPIC_API_KEY: "" } });
+      // Managed runs use their own isolated home and never read the user's settings.
+      const managed = buildClaudeAcpConfig({ managedAiConnection: { grantId: "g" } }, inherited);
+      expect(managed.model).toBe("stale-model");
+      expect((managed.env as Record<string, string>).ANTHROPIC_API_KEY).toBeUndefined();
+    } finally {
+      await fs.rm(configDir, { recursive: true, force: true });
+    }
+  });
+
   it("maps Claude config to the ACPX Claude target", () => {
     expect(buildClaudeAcpConfig({
       engine: "acp",

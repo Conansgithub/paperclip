@@ -70,7 +70,8 @@ export const createAgentInstructionsBundleSchema = z.object({
 });
 
 export const agentRuntimeConfigSchema = z.object({
-  aiConnection: aiConnectionBindingSchema.optional(),
+  /** null (update only): stop using a managed connection and run on this machine's own CLI configuration. */
+  aiConnection: aiConnectionBindingSchema.nullable().optional(),
   debug: z.object({
     providerTrace: z.literal("raw").optional(),
   }).strict().optional(),

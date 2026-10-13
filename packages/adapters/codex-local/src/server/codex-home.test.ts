@@ -179,6 +179,29 @@ describe("codex managed home", () => {
     }
   });
 
+  it("re-copies config.toml when the shared source changes (CC Switch provider switch)", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-home-"));
+    try {
+      const sharedCodexHome = path.join(root, "shared-codex-home");
+      const paperclipHome = path.join(root, "paperclip-home");
+      const managedConfig = path.join(paperclipHome, "instances", "default", "companies", "company-1", "codex-home", "config.toml");
+      const env = { CODEX_HOME: sharedCodexHome, PAPERCLIP_HOME: paperclipHome, PAPERCLIP_INSTANCE_ID: "default" };
+      await fs.mkdir(sharedCodexHome, { recursive: true });
+      await fs.writeFile(path.join(sharedCodexHome, "config.toml"), 'model_provider = "a"\n', "utf8");
+      await prepareManagedCodexHome(env, async () => {}, "company-1");
+      expect(await fs.readFile(managedConfig, "utf8")).toBe('model_provider = "a"\n');
+      // A run appends managed blocks to the copy; an unchanged source keeps them.
+      await fs.appendFile(managedConfig, "# managed\n");
+      await prepareManagedCodexHome(env, async () => {}, "company-1");
+      expect(await fs.readFile(managedConfig, "utf8")).toBe('model_provider = "a"\n# managed\n');
+      await fs.writeFile(path.join(sharedCodexHome, "config.toml"), 'model_provider = "b"\n', "utf8");
+      await prepareManagedCodexHome(env, async () => {}, "company-1");
+      expect(await fs.readFile(managedConfig, "utf8")).toBe('model_provider = "b"\n');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   // Direct unit coverage for the new ensureSymlink branch (#5028). The
   // regression test above goes through prepareManagedCodexHome, whose
   // pre-existing apikey-mode cleanup `fs.rm`s the stale auth.json before
@@ -906,6 +929,26 @@ describe("evaluateCodexCredentialReadiness", () => {
       });
       expect(result).toMatchObject({ managed: true, authMode: "subscription", ready: false });
       expect(result.effectiveHome).toBe(path.resolve(fx.managedAgentHome));
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a shared config.toml custom provider with its own token as ready (CC Switch)", async () => {
+    const fx = await makeFixture();
+    try {
+      const write = (body: string) => fs.writeFile(path.join(fx.sharedCodexHome, "config.toml"), body, "utf8");
+      const ready = async () => (await evaluateCodexCredentialReadiness({ env: fx.env, companyId: "company-1", configuredCodexHome: null, configuredApiKey: "" })).ready;
+      await write('model_provider = "custom"\nmodel = "m"\n\n[model_providers.custom]\nname = "relay"\nbase_url = "https://relay.example/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nexperimental_bearer_token = "fixture"\n');
+      expect(await ready()).toBe(true);
+      // A provider that still needs the OpenAI login, or the built-in openai provider, is not enough.
+      await write('model_provider = "custom"\n\n[model_providers.custom]\nbase_url = "https://relay.example/v1"\nrequires_openai_auth = true\n');
+      expect(await ready()).toBe(false);
+      await write('model_provider = "openai"\n');
+      expect(await ready()).toBe(false);
+      // A provider id that only appears inside a table is not a root-level selection.
+      await write('[profiles.x]\nmodel_provider = "custom"\n\n[model_providers.custom]\nexperimental_bearer_token = "fixture"\n');
+      expect(await ready()).toBe(false);
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true });
     }
