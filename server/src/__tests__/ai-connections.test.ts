@@ -4,7 +4,7 @@ import { issueRecoveryActionService } from "../services/issue-recovery-actions.j
 import * as localCredentials from "../services/local-ai-credentials.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, access, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, access, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { and, eq, sql } from "drizzle-orm";
@@ -290,6 +290,17 @@ describe("managed AI connections", () => {
       await expect(assertManagedAiProjectAuth({ args: ["--api-key=override"] }, "xai", target)).rejects.toThrow("overrides");
     } finally { execute.mockRestore(); }
   });
+  it("ignores the user-level ~/.claude settings that the managed home replaces", async () => {
+    const fakeHome = await mkdtemp(path.join(os.tmpdir(), "paperclip-ai-user-home-"));
+    const homedir = vi.spyOn(os, "homedir").mockReturnValue(fakeHome);
+    try {
+      await mkdir(path.join(fakeHome, ".claude"));
+      await writeFile(path.join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: "fixture" } }));
+      await mkdir(path.join(fakeHome, "project"));
+      await expect(assertManagedAiProjectAuth({ cwd: path.join(fakeHome, "project") }, "anthropic")).resolves.toBeUndefined();
+      await expect(assertManagedAiProjectAuth({ cwd: fakeHome }, "anthropic")).rejects.toThrow("conflict");
+    } finally { homedir.mockRestore(); await rm(fakeHome, { recursive: true, force: true }); }
+  });
   it("keeps personal defaults separate and does not replace the first default", async () => {
     const first = await create("alice", "Alice first");
     await create("alice", "Alice second");
@@ -354,6 +365,14 @@ describe("managed AI connections", () => {
     expect(ae.HOME).not.toBe(be.HOME); expect(a.identity).not.toBe(b.identity);
     expect(a.config.model).toBe("unchanged-model"); expect(config.env.ANTHROPIC_API_KEY).toBe("project-never-use");
     await Promise.all([a.cleanup(), b.cleanup()]); await expect(access(ae.HOME)).rejects.toThrow();
+  });
+  it("keeps Anthropic runs on the operator-set ANTHROPIC_BASE_URL the key was validated against", async () => {
+    vi.stubEnv("ANTHROPIC_BASE_URL", "https://relay.example.com/api");
+    try {
+      const runtime = await prepareManagedAiRuntime(db, { ...input, responsibleUserId: "alice", config: {} });
+      expect((runtime.config.env as Record<string, string>).ANTHROPIC_BASE_URL).toBe("https://relay.example.com/api");
+      await runtime.cleanup();
+    } finally { vi.stubEnv("ANTHROPIC_BASE_URL", undefined); }
   });
   it("blocks missing identity, incompatible providers, and cross-company explicit selections", async () => {
     await expect(service.select({ ...input, userId: null })).rejects.toThrow("responsible user");
@@ -754,6 +773,17 @@ describe("managed AI connections", () => {
     const request = vi.fn().mockResolvedValue(new Response("secret-provider-body", { status: 401 }));
     await expect(validateAiApiKey("anthropic", "fixture", request)).rejects.toThrow("rejected");
     expect(request.mock.calls[0][1].redirect).toBe("error");
+  });
+  it("validates an Anthropic key against ANTHROPIC_BASE_URL when the server sets it", async () => {
+    const request = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const prev = process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_BASE_URL = "https://relay.example.com/api/";
+    try {
+      await validateAiApiKey("anthropic", "fixture", request);
+      expect(request.mock.calls[0][0]).toBe("https://relay.example.com/api/v1/models?limit=1");
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_BASE_URL; else process.env.ANTHROPIC_BASE_URL = prev;
+    }
   });
   it("uses the authenticated responsible user for agent-originated configuration and tests", async () => {
     const req = { actor: { type: "agent", agentId, onBehalfOfUserId: "alice" } } as express.Request;

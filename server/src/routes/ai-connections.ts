@@ -133,14 +133,14 @@ export async function canInstallSharedAiConnectionForNewAgent(
     connection.creator === userId || await accessService(db).hasPermission(companyId, "user", userId, "tools:manage_connections");
 }
 
-/** Fixed provider endpoints; credentials are never sent to a caller-supplied URL or through a redirect. */
+/** Provider endpoints are fixed or operator-set (ANTHROPIC_BASE_URL in the server env); credentials are never sent to a caller-supplied URL or through a redirect. */
 export async function validateAiApiKey(
   provider: AiProvider,
   key: string,
   request: typeof fetch = fetch,
 ) {
   const endpoints = {
-    anthropic: "https://api.anthropic.com/v1/models?limit=1",
+    anthropic: `${(process.env.ANTHROPIC_BASE_URL?.trim() || "https://api.anthropic.com").replace(/\/+$/, "")}/v1/models?limit=1`,
     openai: "https://api.openai.com/v1/models",
     openrouter: "https://openrouter.ai/api/v1/key",
     xai: "https://api.x.ai/v1/models",

@@ -140,10 +140,14 @@ done`,
       );
     return;
   }
-  let directory =
+  const start =
     typeof config.cwd === "string" ? path.resolve(config.cwd) : process.cwd();
+  // The home-level .claude/.codex is the user config dir, replaced by the managed
+  // HOME/CLAUDE_CONFIG_DIR/CODEX_HOME; it only counts as project settings as the cwd itself.
+  const userHome = os.homedir();
+  let directory = start;
   for (;;) {
-    for (const relative of files) {
+    for (const relative of directory === userHome && directory !== start ? [] : files) {
       try {
         const content = await readFile(path.join(directory, relative), "utf8");
         if (
@@ -278,6 +282,10 @@ export async function prepareManagedAiRuntime(
       ...Object.fromEntries(AI_AUTH_ENV_KEYS.map((key) => [key, ""])),
       ...managedAiHomeEnvironment(home),
     };
+    // The operator-set relay in the server env is where validateAiApiKey checked the key; keep runs on it.
+    const operatorAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL?.trim();
+    if (input.binding.provider === "anthropic" && operatorAnthropicBaseUrl)
+      env.ANTHROPIC_BASE_URL = operatorAnthropicBaseUrl;
     const capability =
       AI_CONNECTION_CAPABILITIES[input.binding.provider].methods[
         selection.attribution.method
