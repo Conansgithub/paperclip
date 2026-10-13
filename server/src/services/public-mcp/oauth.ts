@@ -37,6 +37,10 @@ export function publicMcpConfig(env: NodeJS.ProcessEnv = process.env, authPublic
   return { origin: url.origin, resource: url.origin + PUBLIC_MCP_PATH };
 }
 export type PublicMcpConfig = NonNullable<ReturnType<typeof publicMcpConfig>>;
+/** A real board user: a signed-in session, a cloud tenant, or the no-login board of a loopback-only local_trusted instance. */
+export function canApproveAssistantAccess(actor: Request["actor"]): actor is Request["actor"] & { userId: string } {
+  return actor.type === "board" && !!actor.userId && ["session", "cloud_tenant", "local_implicit"].includes(actor.source ?? "");
+}
 export type McpPrincipal = {
   grant: typeof mcpOauthGrants.$inferSelect;
   actor: Request["actor"];
@@ -171,8 +175,7 @@ export function createPublicMcpOAuth(db: Db, config: PublicMcpConfig, options: {
   }
 
   async function consentContext(actor: Request["actor"], requestedCompanyId: string | null) {
-    const signedIn = actor.type === "board" && !!actor.userId && ["session", "cloud_tenant"].includes(actor.source ?? "");
-    const access = signedIn ? await boardAuth.resolveBoardAccess(actor.userId!) : null;
+    const access = canApproveAssistantAccess(actor) ? await boardAuth.resolveBoardAccess(actor.userId) : null;
     const available = access?.user && access.companyIds.length ? await db.select({ id: companies.id, name: companies.name, status: companies.status, logoAssetId: companyLogos.assetId })
       .from(companies).leftJoin(companyLogos, eq(companyLogos.companyId, companies.id)).where(inArray(companies.id, access.companyIds)) : [];
     return { requiresSignIn: !access?.user, companies: available.flatMap((company) => {
@@ -184,7 +187,7 @@ export function createPublicMcpOAuth(db: Db, config: PublicMcpConfig, options: {
   }
 
   async function approveGrant(tx: Db, actor: Request["actor"], request: { requestedCompanyId: string | null; clientId: string; resource: string; scopes: string[] }, input: { companyId?: string; allowWrites: boolean }) {
-    if (actor.type !== "board" || !actor.userId || !["session", "cloud_tenant"].includes(actor.source ?? "")) throw new McpOAuthError("access_denied", "Sign in to approve an assistant connection.", 401);
+    if (!canApproveAssistantAccess(actor)) throw new McpOAuthError("access_denied", "Sign in to approve an assistant connection.", 401);
     const access = await boardAuth.resolveBoardAccess(actor.userId);
     const membership = access.memberships.find(m => m.companyId === input.companyId && m.status === "active");
     if (!access.user || !membership || (request.requestedCompanyId && request.requestedCompanyId !== input.companyId)) throw new McpOAuthError("access_denied", "Choose an available organization for this request.", 403);
@@ -264,7 +267,7 @@ export function createPublicMcpOAuth(db: Db, config: PublicMcpConfig, options: {
     },
     async consentDevice(userCode: string, actor: Request["actor"], input: { decision: "approve" | "deny"; companyId?: string; allowWrites: boolean }) {
       await assertEnabled();
-      if (actor.type !== "board" || !actor.userId || !["session", "cloud_tenant"].includes(actor.source ?? "")) throw new McpOAuthError("access_denied", "Sign in to approve a connection.", 401);
+      if (!canApproveAssistantAccess(actor)) throw new McpOAuthError("access_denied", "Sign in to approve a connection.", 401);
       return db.transaction(async tx => {
         const [row] = await tx.select().from(mcpOauthDeviceRequests).where(eq(mcpOauthDeviceRequests.userCodeHash, deviceHash(userCode))).for("update");
         if (!row || row.status !== "pending" || row.expiresAt <= new Date()) throw invalidGrant();
@@ -338,7 +341,7 @@ export function createPublicMcpOAuth(db: Db, config: PublicMcpConfig, options: {
     },
     async consent(id: string, actor: Request["actor"], input: { decision: "approve" | "deny"; companyId?: string; allowWrites: boolean }) {
       await assertEnabled();
-      if (actor.type !== "board" || !actor.userId || !["session", "cloud_tenant"].includes(actor.source ?? "")) {
+      if (!canApproveAssistantAccess(actor)) {
         throw new McpOAuthError("access_denied", "Sign in to approve an assistant connection.", 401);
       }
       const access = await boardAuth.resolveBoardAccess(actor.userId);

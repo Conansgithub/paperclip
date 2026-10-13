@@ -424,7 +424,7 @@ describe.skipIf(!support.supported)("public MCP OAuth and tool boundary", () => 
     await expect(oauth.authenticate(revocable.tokens.access_token)).rejects.toThrow();
   });
 
-  it("limits assistant setup metadata to signed-in humans", async () => {
+  it("limits assistant setup metadata to signed-in humans and the local_trusted board", async () => {
     const app = express();
     let actor: Request["actor"] = { type: "none" };
     app.use((req, _res, next) => { req.actor = actor; next(); });
@@ -432,16 +432,32 @@ describe.skipIf(!support.supported)("public MCP OAuth and tool boundary", () => 
     for (const candidate of [
       { type: "none" },
       { type: "agent", agentId: randomUUID(), companyId: randomUUID() },
-      { type: "board", source: "local_implicit", userId: "board" },
       { type: "board", source: "mcp_oauth", userId: randomUUID() },
+      { type: "board", source: "board_key", userId: randomUUID() },
     ] as Request["actor"][]) {
       actor = candidate;
       expect((await request(app).get("/api/mcp/setup")).status).toBe(401);
     }
-    for (const source of ["session", "cloud_tenant"] as const) {
+    for (const source of ["session", "cloud_tenant", "local_implicit"] as const) {
       actor = { type: "board", source, userId: randomUUID() };
       expect((await request(app).get("/api/mcp/setup")).body).toMatchObject({ enabled: true, serverUrl: config.resource });
     }
+  });
+
+  it("lets the local_trusted board approve a connection for a company it owns", async () => {
+    const userId = randomUUID();
+    await db.insert(authUsers).values({ id: userId, name: "Board", email: userId + "@paperclip.local", createdAt: new Date(), updatedAt: new Date() });
+    const [company] = await db.insert(companies).values({ name: "Local", issuePrefix: "L" + randomBytes(4).toString("hex") }).returning();
+    await db.insert(companyMemberships).values({ companyId: company!.id, principalType: "user", principalId: userId, membershipRole: "owner", status: "active" });
+    const actor: Request["actor"] = { type: "board", source: "local_implicit", userId };
+    const client = await oauth.register({ client_name: "Local client", redirect_uris: [redirectUri] }, randomUUID());
+    const id = (await oauth.authorize({ client_id: client.client_id, redirect_uri: redirectUri, resource: config.resource, scope: "paperclip:read paperclip:write", response_type: "code", code_challenge: challenge, code_challenge_method: "S256" })).split("/").at(-1)!;
+    expect(await oauth.describeRequest(id, actor, null)).toMatchObject({ requiresSignIn: false, companies: [{ id: company!.id, canWrite: true }] });
+    const consent = await oauth.consent(id, actor, { decision: "approve", companyId: company!.id, allowWrites: true });
+    const tokens = await oauth.token({ grant_type: "authorization_code", client_id: client.client_id, redirect_uri: redirectUri, resource: config.resource, code: new URL(consent.redirectUrl).searchParams.get("code")!, code_verifier: verifier });
+    const principal = await oauth.authenticate(tokens.access_token);
+    // The granted token stays scoped to the consented company even though the local board is an instance admin.
+    expect(principal.actor).toMatchObject({ source: "mcp_oauth", userId, companyIds: [company!.id], isInstanceAdmin: false });
   });
 
   it("rotates refresh tokens and persists revocation on replay", async () => {

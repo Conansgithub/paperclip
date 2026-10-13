@@ -575,7 +575,11 @@ export async function createApp(
     }),
   );
   let mcpConfig: ReturnType<typeof publicMcpConfig> = null;
-  try { mcpConfig = publicMcpConfig(process.env, opts.authPublicBaseUrl); }
+  // local_trusted binds loopback only; default to the same localhost spelling the
+  // connector flows advertise, without setting PAPERCLIP_PUBLIC_URL (which would
+  // also move connector return origins off the enrolled one).
+  const localMcpOrigin = opts.deploymentMode === "local_trusted" ? `http://localhost:${opts.serverPort}` : undefined;
+  try { mcpConfig = publicMcpConfig(process.env, opts.authPublicBaseUrl ?? localMcpOrigin); }
   catch { logger.warn("Assistant connections require an HTTPS public URL (HTTP loopback is allowed for development)."); }
   const publicMcpOAuth = mcpConfig ? createPublicMcpOAuth(db, mcpConfig) : null;
   const publicMcpIngress = Router();

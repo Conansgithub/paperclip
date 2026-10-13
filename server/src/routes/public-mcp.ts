@@ -7,7 +7,7 @@ import { publicMcpEventDefinitions, type PublicMcpEvents } from "../services/pub
 import { McpEventError } from "../services/public-mcp/event-webhooks.js";
 import { PUBLIC_MCP_PATH, PUBLIC_MCP_SCOPES, mcpConsentSchema, mcpInvitation, mcpSetupUrl } from "@paperclipai/shared";
 import { renderMcpSetup, mcpSetupMarkdown } from "../services/public-mcp/setup.js";
-import { DEVICE_GRANT, McpOAuthError, type PublicMcpOAuth } from "../services/public-mcp/oauth.js";
+import { DEVICE_GRANT, McpOAuthError, canApproveAssistantAccess, type PublicMcpOAuth } from "../services/public-mcp/oauth.js";
 import { McpApiError, McpCapabilityError, publicMcpCapabilities, type createPublicMcpExecutor } from "../services/public-mcp/capabilities.js";
 
 const oauthErrors: ErrorRequestHandler = (error, _req, res, next) => {
@@ -177,7 +177,7 @@ export function publicMcpIngressRoutes(oauth: PublicMcpOAuth, execute: ReturnTyp
 export function publicMcpManagementRoutes(oauth: PublicMcpOAuth) {
   const router = Router();
   const realUser: RequestHandler = (req, _res, next) => {
-    if (req.actor.type !== "board" || !req.actor.userId || !["session", "cloud_tenant"].includes(req.actor.source ?? "")) {
+    if (!canApproveAssistantAccess(req.actor)) {
       throw new McpOAuthError("access_denied", "Sign in to manage assistant connections.", 401);
     }
     next();
