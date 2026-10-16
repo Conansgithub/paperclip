@@ -4973,3 +4973,22 @@ export async function runChildProcess(
       .catch(reject);
   });
 }
+
+const CODEX_HOME_MANAGED_FILES = new Set(["auth.json", "config.json", "config.toml", "instructions.md"]);
+
+/**
+ * Extra files a Codex `config.toml` loads relative to its `CODEX_HOME`, so a
+ * Paperclip-managed home can carry them next to the copied config. CC Switch
+ * writes `model_catalog_json = "cc-switch-model-catalog.json"`; without that
+ * file Codex rejects the whole config and falls back to the OpenAI login.
+ */
+export async function readCodexHomeRelativeConfigFiles(home: string): Promise<string[]> {
+  const raw = await fs.readFile(path.join(home, "config.toml"), "utf8").catch(() => "");
+  // ponytail: line scan of root `model_catalog_json`, bare file names only; widen when Codex adds more home-relative file keys.
+  const lines = raw.split(/\r?\n/);
+  const firstTable = lines.findIndex((line) => /^\s*\[/.test(line));
+  const root = firstTable === -1 ? lines : lines.slice(0, firstTable);
+  return root
+    .map((line) => /^\s*model_catalog_json\s*=\s*["']([^"']+)["']/.exec(line)?.[1]?.trim() ?? "")
+    .filter((name) => name && name !== ".." && path.basename(name) === name && !CODEX_HOME_MANAGED_FILES.has(name));
+}

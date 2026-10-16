@@ -73,6 +73,7 @@ import {
   materializePaperclipSkillCopy,
   parseObject,
   isPaperclipSkillSourceMissing,
+  readCodexHomeRelativeConfigFiles,
   readPaperclipRuntimeSkillEntries,
   readPaperclipIssueWorkModeFromContext,
   renderTemplate,
@@ -1046,7 +1047,7 @@ async function prepareManagedCodexHome(input: {
     if (await pathExists(sourceAuth)) await ensureSymlink(targetAuth, sourceAuth);
   }
 
-  for (const name of ["config.json", "config.toml", "instructions.md"]) {
+  for (const name of ["config.json", "config.toml", "instructions.md", ...await readCodexHomeRelativeConfigFiles(sourceHome)]) {
     const source = path.join(sourceHome, name);
     if (await pathExists(source)) await ensureCopiedFile(path.join(targetHome, name), source);
   }

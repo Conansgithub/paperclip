@@ -1826,6 +1826,9 @@ describe("shared ACPX engine runtime behavior", () => {
     const managedAuth = path.join(managedCodexHome, "auth.json");
     await fs.writeFile(sourceAuth, "{\"source\":true}", "utf8");
     await fs.writeFile(managedAuth, "{\"stale\":true}", "utf8");
+    // CC Switch config: Codex loads the catalog relative to CODEX_HOME.
+    await fs.writeFile(path.join(sourceCodexHome, "config.toml"), "model_catalog_json = \"catalog.json\"\n", "utf8");
+    await fs.writeFile(path.join(sourceCodexHome, "catalog.json"), "{\"models\":[]}", "utf8");
 
     const previousCodexHome = process.env.CODEX_HOME;
     const previousPaperclipHome = process.env.PAPERCLIP_HOME;
@@ -1852,6 +1855,7 @@ describe("shared ACPX engine runtime behavior", () => {
     const authStat = await fs.lstat(managedAuth);
     expect(authStat.isSymbolicLink()).toBe(true);
     expect(path.resolve(path.dirname(managedAuth), await fs.readlink(managedAuth))).toBe(sourceAuth);
+    expect(await fs.readFile(path.join(managedCodexHome, "catalog.json"), "utf8")).toBe("{\"models\":[]}");
   });
 
   it.each(["OPENAI_API_KEY", "CODEX_API_KEY"] as const)(

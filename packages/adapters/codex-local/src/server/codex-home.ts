@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
-import { resolvePaperclipInstanceRootForAdapter } from "@paperclipai/adapter-utils/server-utils";
+import { readCodexHomeRelativeConfigFiles, resolvePaperclipInstanceRootForAdapter } from "@paperclipai/adapter-utils/server-utils";
 import { isCodexAuthCachePath, readSubscriptionAccountId } from "./codex-auth-cache.js";
 
 const TRUTHY_ENV_RE = /^(1|true|yes|on)$/i;
@@ -589,7 +589,8 @@ async function stageCodexHomeEntry(
 }
 
 /**
- * Stages exactly {@link CODEX_SYNC_ALLOWLIST} from `effectiveCodexHome` into a
+ * Stages exactly {@link CODEX_SYNC_ALLOWLIST}, plus the home-relative files its
+ * `config.toml` loads (e.g. a CC Switch model catalog), from `effectiveCodexHome` into a
  * fresh private temp dir and returns its path, for registration as the sandbox
  * `home` asset. This replaces syncing the whole managed home + a name denylist:
  * only the files Codex actually needs are uploaded, so oversized runtime state
@@ -618,7 +619,7 @@ export async function stageCodexHomeForSync(
     path.join(os.tmpdir(), `paperclip-codex-home-sync-${runIdPart ? `${runIdPart}-` : ""}`),
   );
   try {
-    for (const entry of CODEX_SYNC_ALLOWLIST) {
+    for (const entry of [...CODEX_SYNC_ALLOWLIST, ...await readCodexHomeRelativeConfigFiles(effectiveCodexHome)]) {
       await stageCodexHomeEntry(effectiveCodexHome, stagedHome, entry);
     }
     return stagedHome;
@@ -771,7 +772,7 @@ export async function seedManagedCodexHome(
       await ensureSymlink(path.join(targetHome, name), source);
     }
 
-    for (const name of COPIED_SHARED_FILES) {
+    for (const name of [...COPIED_SHARED_FILES, ...await readCodexHomeRelativeConfigFiles(sourceHome)]) {
       const source = path.join(sourceHome, name);
       if (!(await pathExists(source))) continue;
       await ensureCopiedFile(path.join(targetHome, name), source);

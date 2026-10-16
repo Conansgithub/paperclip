@@ -202,6 +202,36 @@ describe("codex managed home", () => {
     }
   });
 
+  it("carries the home-relative model catalog a CC Switch config.toml loads", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-home-"));
+    try {
+      const sharedCodexHome = path.join(root, "shared-codex-home");
+      const paperclipHome = path.join(root, "paperclip-home");
+      const managedHome = path.join(paperclipHome, "instances", "default", "companies", "company-1", "codex-home");
+      const env = { CODEX_HOME: sharedCodexHome, PAPERCLIP_HOME: paperclipHome, PAPERCLIP_INSTANCE_ID: "default" };
+      await fs.mkdir(sharedCodexHome, { recursive: true });
+      await fs.writeFile(path.join(root, "outside.json"), "{}", "utf8");
+      await fs.writeFile(path.join(sharedCodexHome, "catalog.json"), '{"models":[]}', "utf8");
+      await fs.writeFile(
+        path.join(sharedCodexHome, "config.toml"),
+        'model_catalog_json = "catalog.json"\nmodel_catalog_json = "../outside.json"\n\n[tui]\nmodel_catalog_json = "ignored.json"\n',
+        "utf8",
+      );
+      await prepareManagedCodexHome(env, async () => {}, "company-1");
+      expect(await fs.readFile(path.join(managedHome, "catalog.json"), "utf8")).toBe('{"models":[]}');
+      await expect(fs.access(path.join(managedHome, "..", "outside.json"))).rejects.toThrow();
+
+      const staged = await stageCodexHomeForSync(managedHome);
+      try {
+        expect(await fs.readFile(path.join(staged, "catalog.json"), "utf8")).toBe('{"models":[]}');
+      } finally {
+        await fs.rm(staged, { recursive: true, force: true });
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   // Direct unit coverage for the new ensureSymlink branch (#5028). The
   // regression test above goes through prepareManagedCodexHome, whose
   // pre-existing apikey-mode cleanup `fs.rm`s the stale auth.json before
